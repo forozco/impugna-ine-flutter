@@ -1,233 +1,370 @@
+import 'dart:io';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/widgets/impugna_app_bar.dart';
+import '../../../../shared/widgets/stepper/wizard_stepper.dart';
 import '../../domain/entities/registro_state.dart';
 import '../providers/registro_provider.dart';
-import '../widgets/wizard_layout.dart';
 
 /// Step 0: Actores - Selección de quién está impugnando
+/// Replica exactamente el comportamiento de la versión web
 class Step0ActoresScreen extends ConsumerStatefulWidget {
   const Step0ActoresScreen({super.key});
 
   @override
-  ConsumerState<Step0ActoresScreen> createState() => _Step0ActoresScreenState();
+  ConsumerState<Step0ActoresScreen> createState() =>
+      _Step0ActoresScreenState();
 }
 
 class _Step0ActoresScreenState extends ConsumerState<Step0ActoresScreen> {
+  bool _isFromExpediente = false;
+  String? _tipoRegistro;
   String? _selectedOption;
-  String? _tipoImpugnacion;
-  final _folioController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    // Cargar datos existentes si los hay
+    // Detectar si viene desde expediente
     final step0Data = ref.read(registroProvider).step0Data;
-    if (step0Data != null) {
-      _selectedOption = step0Data.option;
-      _tipoImpugnacion = step0Data.tipoImpugnacion;
-      if (step0Data.folio != null) {
-        _folioController.text = step0Data.folio!;
-      }
+    if (step0Data != null && step0Data.folio != null) {
+      _isFromExpediente = true;
+      _tipoRegistro = step0Data.tipoImpugnacion;
     }
+    // Cargar opción previamente seleccionada si existe
+    _selectedOption = step0Data?.option;
   }
 
-  @override
-  void dispose() {
-    _folioController.dispose();
-    super.dispose();
+  bool get _isCoadyuvante => _tipoRegistro == 'coadyuvante';
+  bool get _isAmpliacion => _tipoRegistro == 'ampliacion';
+  bool get _showContinueButton =>
+      _isFromExpediente && _isAmpliacion && !_isCoadyuvante;
+
+  /// Seleccionar opción y guardar en Riverpod
+  void _selectOption(String option) {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _selectedOption = option;
+    });
+
+    final step0Data = Step0Data(
+      option: option,
+      tipoImpugnacion: _tipoRegistro ?? '',
+      folio: ref.read(registroProvider).step0Data?.folio,
+    );
+    ref.read(registroProvider.notifier).updateStep0(step0Data);
   }
 
-  void _handleNext() {
-    if (_selectedOption != null) {
-      // Guardar datos del step
-      final step0Data = Step0Data(
-        option: _selectedOption!,
-        tipoImpugnacion: _tipoImpugnacion,
-        folio: _folioController.text.isEmpty ? null : _folioController.text,
-      );
+  /// Navegar a Titular (Agraviado) - Step 3
+  void _navigateToTitular() {
+    _selectOption('titular');
+    ref.read(registroProvider.notifier).goToStep(3);
+  }
 
-      ref.read(registroProvider.notifier).updateStep0(step0Data);
+  /// Navegar a Representante(s) - Step 1
+  void _navigateToRepresentante() {
+    _selectOption('representantes');
+    ref.read(registroProvider.notifier).goToStep(1);
+  }
 
-      // Navegar al siguiente paso
-      final nextStep = ref.read(registroProvider.notifier).getNextStepIndex();
-      ref.read(registroProvider.notifier).goToStep(nextStep);
+  /// Continuar desde expediente (solo para ampliación)
+  void _continueFromExpediente() {
+    HapticFeedback.mediumImpact();
+    ref.read(registroProvider.notifier).goToStep(3);
+  }
+
+  /// Retroceder
+  void _onBack() {
+    HapticFeedback.selectionClick();
+    if (_isFromExpediente) {
+      context.pop();
+    } else {
+      context.pop();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final canNext = _selectedOption != null;
+    final bool isIOS = Platform.isIOS;
+    final registroState = ref.watch(registroProvider);
 
-    return WizardLayout(
-      canNext: canNext,
-      showPrevious: false,
-      onNext: _handleNext,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: ImpugnaAppBar(
+        showBackButton: true,
+        onBackPressed: _onBack,
+      ),
+      body: Column(
         children: [
-          // Título
-          Text(
-            '¿Quién está impugnando?',
-            style: Theme.of(context).textTheme.headlineMedium,
+          // Wizard Stepper
+          WizardStepper(
+            currentStep: 0,
+            totalSteps: 6,
+            stepLabels: const ['Actores', 'Representante', 'Autoridades', 'Descripción', 'Documentos', 'Confirmación'],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Selecciona si tú eres el titular o si actúas como representante',
-            style: Theme.of(context).textTheme.bodyLarge,
-          ),
-          const SizedBox(height: 24),
+          // Content
+          Expanded(
+            child: SingleChildScrollView(
+              physics: isIOS ? const BouncingScrollPhysics() : const ClampingScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header con "Dato obligatorio" condicional
+                    // if (!_isFromExpediente || _isCoadyuvante) ...[
+                    //   Row(
+                    //     children: [
+                    //       Text(
+                    //         'Dato obligatorio ',
+                    //         style: TextStyle(
+                    //           fontSize: 13,
+                    //           color: Colors.grey.shade600,
+                    //           fontWeight: FontWeight.w400,
+                    //         ),
+                    //       ),
+                    //       Text(
+                    //         '(*)',
+                    //         style: TextStyle(
+                    //           fontSize: 13,
+                    //           color: Colors.red.shade700,
+                    //           fontWeight: FontWeight.w700,
+                    //         ),
+                    //       ),
+                    //     ],
+                    //   ),
+                    //   const SizedBox(height: 16),
+                    // ],
 
-          // Opción: Titular
-          _buildOptionCard(
-            title: 'Yo soy el titular',
-            description:
-                'Estoy registrando la impugnación a mi nombre como titular',
-            icon: Icons.person,
-            value: 'titular',
-          ),
+                    // Título principal
+                    // Text(
+                    //   'Elige el tipo de persona que registra la impugnación',
+                    //   style: TextStyle(
+                    //     fontSize: 22,
+                    //     fontWeight: FontWeight.w700,
+                    //     color: AppColors.textPrimary,
+                    //     height: 1.3,
+                    //   ),
+                    // ),
+                    // const SizedBox(height: 28),
 
-          const SizedBox(height: 16),
+                // Radio Group con espaciado nativo
+                Column(
+                  children: [
+                    // Opción 1: Titular
+                    if (_isFromExpediente && _isAmpliacion)
+                      _buildStaticCard(
+                        label: 'Titular (Agraviado)',
+                      )
+                    else
+                      _buildRadioCard(
+                        label: _isCoadyuvante
+                            ? 'Titular del registro'
+                            : 'Titular (Agraviado)',
+                        value: 'titular',
+                        onTap: _navigateToTitular,
+                        isSelected: _selectedOption == 'titular',
+                      ),
 
-          // Opción: Representantes
-          _buildOptionCard(
-            title: 'Actúo como representante',
-            description:
-                'Estoy registrando la impugnación en representación de otra(s) persona(s)',
-            icon: Icons.people,
-            value: 'representantes',
-          ),
+                    const SizedBox(height: 16),
 
-          if (_selectedOption != null) ...[
-            const SizedBox(height: 32),
-            const Divider(),
-            const SizedBox(height: 24),
+                    // Opción 2: Representante(s)
+                    _buildRadioCard(
+                      label: 'Representante(s)',
+                      value: 'representantes',
+                      onTap: _navigateToRepresentante,
+                      isSelected: _selectedOption == 'representantes',
+                    ),
+                  ],
+                ),
 
-            // Tipo de impugnación (opcional)
-            Text(
-              'Tipo de impugnación',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 12),
+                    // Botones de navegación
+                    const SizedBox(height: 48),
 
-            DropdownButtonFormField<String>(
-              value: _tipoImpugnacion,
-              decoration: const InputDecoration(
-                labelText: 'Tipo de impugnación (opcional)',
-                hintText: 'Selecciona un tipo',
+                    // Botón Continuar (solo para ampliación desde expediente)
+                    if (_showContinueButton) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: _buildButton(
+                          context: context,
+                          label: 'Continuar',
+                          onPressed: _continueFromExpediente,
+                          isPrimary: true,
+                          isIOS: isIOS,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Botón Retroceder
+                    SizedBox(
+                      width: double.infinity,
+                      child: _buildButton(
+                        context: context,
+                        label: 'Retroceder',
+                        onPressed: _onBack,
+                        isPrimary: false,
+                        isIOS: isIOS,
+                      ),
+                    ),
+
+                    const SizedBox(height: 24), // Padding bottom
+                  ],
+                ),
               ),
-              items: const [
-                DropdownMenuItem(
-                  value: 'ampliacion',
-                  child: Text('Ampliación de demanda'),
-                ),
-                DropdownMenuItem(
-                  value: 'coadyuvante',
-                  child: Text('Tercero interesado - Coadyuvante'),
-                ),
-                DropdownMenuItem(
-                  value: 'amicus',
-                  child: Text('Amigo de la corte (Amicus curiae)'),
-                ),
-              ],
-              onChanged: (value) {
-                setState(() {
-                  _tipoImpugnacion = value;
-                });
-              },
             ),
-
-            const SizedBox(height: 16),
-
-            // Folio (opcional)
-            TextFormField(
-              controller: _folioController,
-              decoration: const InputDecoration(
-                labelText: 'Folio o número de expediente (opcional)',
-                hintText: 'INE-XXX/YYYY-Z',
-              ),
-            ),
-          ],
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildOptionCard({
-    required String title,
-    required String description,
-    required IconData icon,
-    required String value,
+  /// Botón adaptativo iOS/Android
+  Widget _buildButton({
+    required BuildContext context,
+    required String label,
+    required VoidCallback onPressed,
+    required bool isPrimary,
+    required bool isIOS,
   }) {
-    final isSelected = _selectedOption == value;
+    final bgColor = isPrimary ? const Color(0xFFC42C7A) : const Color(0xFFF0EBF2);
+    final textColor = isPrimary ? Colors.white : const Color(0xFF5B2A73);
 
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _selectedOption = value;
-        });
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primary.withOpacity(0.1)
-              : AppColors.greyLight,
-          border: Border.all(
-            color: isSelected ? AppColors.primary : AppColors.border,
-            width: isSelected ? 2 : 1,
+    if (isIOS) {
+      return CupertinoButton(
+        onPressed: onPressed,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 17,
+            fontWeight: FontWeight.w600,
+            color: textColor,
           ),
-          borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          children: [
-            // Icon
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.primary : AppColors.grey,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: AppColors.white, size: 32),
-            ),
-            const SizedBox(width: 16),
+      );
+    } else {
+      return ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: bgColor,
+          foregroundColor: textColor,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          elevation: isPrimary ? 2 : 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+    }
+  }
 
-            // Text content
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
+  /// Card estática (sin radio button) para ampliación desde expediente
+  Widget _buildStaticCard({required String label}) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 40),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Card de selección simple como en web
+  Widget _buildRadioCard({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+    bool isSelected = false,
+  }) {
+    final bool isIOS = Platform.isIOS;
+    final IconData icon = value == 'titular'
+        ? Icons.person_outline
+        : Icons.people_outline;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFFD4C5DC) : const Color(0xFFEBEBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: isSelected
+            ? Border.all(color: const Color(0xFF5B2A73), width: 2)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isSelected ? 0.08 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          splashColor: Colors.grey.shade300,
+          highlightColor: Colors.grey.shade200,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Row(
+              children: [
+                // Icono simple
+                Icon(
+                  icon,
+                  color: const Color(0xFF5B2A73),
+                  size: 28,
+                ),
+                const SizedBox(width: 16),
+                // Label
+                Expanded(
+                  child: Text(
+                    label,
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: isSelected
-                          ? AppColors.primary
-                          : AppColors.textPrimary,
+                      fontSize: 17,
+                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      color: const Color(0xFF333333),
+                      height: 1.3,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
+                ),
+                // Checkmark si está seleccionado
+                if (isSelected)
+                  const Icon(
+                    Icons.check_circle,
+                    color: Color(0xFF5B2A73),
+                    size: 24,
                   ),
-                ],
-              ),
+              ],
             ),
-
-            // Check icon
-            if (isSelected)
-              const Icon(
-                Icons.check_circle,
-                color: AppColors.primary,
-                size: 28,
-              ),
-          ],
+          ),
         ),
       ),
     );

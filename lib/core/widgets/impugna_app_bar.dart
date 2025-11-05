@@ -4,12 +4,14 @@ import '../theme/app_colors.dart';
 
 class ImpugnaAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBackButton;
+  final VoidCallback? onBackPressed;
   final VoidCallback? onMenuTap;
   final VoidCallback? onUserMenuTap;
 
   const ImpugnaAppBar({
     super.key,
     this.showBackButton = false,
+    this.onBackPressed,
     this.onMenuTap,
     this.onUserMenuTap,
   });
@@ -30,7 +32,7 @@ class ImpugnaAppBar extends StatelessWidget implements PreferredSizeWidget {
       leading: showBackButton
           ? IconButton(
               icon: const Icon(Icons.arrow_back, color: AppColors.secondary),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: onBackPressed ?? () => Navigator.of(context).pop(),
             )
           : null,
       title: Row(
